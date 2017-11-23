@@ -36,7 +36,7 @@ public class ZookeeperBackendService implements ServiceDiscoveryBackend, Connect
   private ConnectionState connectionState = ConnectionState.LOST;
   private boolean canBeReadOnly;
   private int connectionTimeoutMs;
-
+private ZKEphemeralNodeCache zkEphemeralNodeCache;
   @Override
   public void init(Vertx vertx, JsonObject configuration) {
     this.vertx = vertx;
@@ -57,6 +57,12 @@ public class ZookeeperBackendService implements ServiceDiscoveryBackend, Connect
         .retryPolicy(new ExponentialBackoffRetry(baseGraceBetweenRetries, maxRetries))
         .build();
     client.getConnectionStateListenable().addListener(this);
+    zkEphemeralNodeCache=new ZKEphemeralNodeCache(basePath,client);
+    try {
+      zkEphemeralNodeCache.start();
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
     client.start();
   }
 
@@ -77,6 +83,8 @@ public class ZookeeperBackendService implements ServiceDiscoveryBackend, Connect
         resultHandler.handle(Future.failedFuture(x.cause()));
       } else {
         try {
+          String path = getPath(record.getRegistration());
+          if(ephemeral) zkEphemeralNodeCache.add(path);
           client.create()
               .creatingParentsIfNeeded()
               .withMode(ephemeral ? CreateMode.EPHEMERAL : CreateMode.PERSISTENT)
@@ -84,7 +92,7 @@ public class ZookeeperBackendService implements ServiceDiscoveryBackend, Connect
                   -> callback(context, record, resultHandler, curatorEvent))
               .withUnhandledErrorListener((s, throwable)
                   -> resultHandler.handle(Future.failedFuture(throwable)))
-              .forPath(getPath(record.getRegistration()), content.getBytes(CHARSET));
+              .forPath(path, content.getBytes(CHARSET));
         } catch (Exception e) {
           resultHandler.handle(Future.failedFuture(e));
         }
